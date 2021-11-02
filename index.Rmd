@@ -1,0 +1,251 @@
+---
+title: 'Project 1: Wrangling, Exploration, Visualization'
+author: "SDS322E"
+date: ''
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: yes
+  pdf_document:
+    toc: no
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, fig.align = "center", warning = F, message = F,
+tidy=TRUE, tidy.opts=list(width.cutoff=60), R.options=list(max.print=100))
+install.packages('plyr', repos = "http://cran.us.r-project.org")
+options(repos = list(CRAN="http://cran.rstudio.com/"))
+```
+
+## Data Wrangling, Exploration, Visualization
+
+### Olivia Lin oyl63
+
+#### Introduction 
+
+I chose 4 datasets: box, on_ice, gar, and xgar. All four datasets contain individual NHL player stats during the 2020-2021 NHL regular season, and were downloaded as CSVs from Evolving-Hockey, a site to which I have a membership. "box" and "on ice" contain data that is scraped from the NHL play by play data as well as some data calculated by a model built by Evolving Hockey. "gar" and "xgar" contain data that is fully calculated by the aforementioned model. 
+
+"box" contains basic box score data for each player at 5v5, such as games played (GP), time on ice (TOI), goals (G), primary assists (A1), secondary assists (A2), and Points. The following columns contain more granular data such as individual shots for (iSF), individual expected goals (ixG), giveaways (GIVE), takeaways (TAKE), etc. "on_ice" has data for the events that occur when a player is on the ice, such as corsi (shot attempts) for and against, as well as the rate they occurred at (calculated as number per 60 minutes played). "gar" stands for Goals Above Replacement, which comes from a regression model built by Evolving Hockey that attempts to isolate the individual player impact on the game by calculating the value of a players contributions in different aspects of the game in terms of goals above replacement level (which is 0), a concept derived from baseball's WAR (wins above replacement). The columns include numbers like "EVO_GAR", which means the goals above replacement by a player at even strength offense, "EVD_GAR" -- GAR at even strength defense, total goals above replacement (GAR), wins above replacement (WAR), and standings points above replacement (SPAR), etc. "xgar" is the same, but calculates the expected goals above replacement rather than the actual GAR. 
+
+This data is interesting to me because it looks beyond just "points" when it comes to measuring a player's impact on the game. It will be a unique perspective to look at players who at first glance at the scoresheet may seem unimpactful because of the lack of points, but are actually contributing in other ways, such as defensively. I believe that the top scorers in the league will have a high number of points and a high EVO_GAR, but it may be surprising to see some of the MVP candidates to be lacking in other areas such as defense and CF%. 
+
+```{R}
+library(tidyverse)
+box <- read_csv("/Users/olivia/Downloads/EH_std_sk_stats_all_regular_no_adj_2021-11-01.csv")
+on_ice <- read_csv("/Users/olivia/Downloads/EH_std_sk_stats_5v5_regular_adj_2021-11-01.csv")
+gar <- read_csv("/Users/olivia/Downloads/EH_gar_sk_stats_regular_2021-11-01.csv")
+xgar <- read_csv("/Users/olivia/Downloads/EH_xgar_sk_stats_regular_2021-11-01.csv")
+head(gar)
+
+```
+
+#### Tidying: Reshaping
+
+My data is already tidy and I will use pivot_longer in the summary statistics section.
+
+
+    
+#### Joining/Merging
+
+```{R}
+full_data <- inner_join(box, on_ice, by=c("Player","Team")) %>% inner_join(gar, by=c("Player","Team")) %>% inner_join(xgar, by=c("Player","Team"))
+
+nrow(box)
+nrow(on_ice)
+nrow(gar)
+nrow(xgar)
+nrow(full_data)
+
+anti_join(box, on_ice, by=c("Player","Team"))
+anti_join(box, gar, by=c("Player","Team"))
+
+full_data %>% summarize(n_distinct(Player))
+```
+
+There were 972 rows in each of the 4 datasets that were joined to create the full_data dataset. There were no observations that appeared in one and not the others which I checked using anti joins, so I did an inner join with all 4 datasets (though it would not have mattered which one I did in this case) and ended up with 972 rows. There was no unique player ID, so I had to use a combination of the player's name and the team to join. There are 913 distinct players but 972 total observations. This is because there are 39 players who played for multiple teams during the season, and therefore have more than one row. These will be kept separate because playing on different teams has an effect on individual player stats. 
+
+####  Wrangling
+
+```{R}
+clean_data <- full_data %>% filter(TOI.x > 200) %>% select(-c(Season.y, Position.y, GP.y, Season.x.x, Position.x.x, GP.x.x, TOI_All.x, Season.y.y, Position.y.y, GP.y.y, TOI_All.y, Take_GAR.y, Draw_GAR.y, Pens_GAR.y)) %>% rename(Season = Season.x,
+            Position = Position.x,
+            GP = GP.x,
+            "TOI_All" = TOI.x,
+            "iSh%" = "Sh%.x",
+            "TOI_5V5" = TOI.y,
+            "Sh%" = "Sh%.y",
+            Draw_GAR = Draw_GAR.x,
+            Take_GAR = Take_GAR.x,
+            Pens_GAR = Pens_GAR.x)
+```
+
+With this code I am filtering out all players who played less than 200 minutes total as that is not a sufficient sample size to calculate rate stats, removing repeat columns from joins, and renaming columns to be more clearly named.
+
+```{r}
+clean_data %>% arrange(desc(GAR)) %>% head()
+clean_data %>% group_by(Team) %>% arrange(Team, desc(GAR)) 
+```
+
+I am arranging by GAR to see who had the most goals above replacement overall, then grouping by team to see which player has the most goals above replacement for each team.
+
+```{r}
+clean_data <- clean_data %>% mutate("G/60" = G/(TOI_All/60),
+                      "A1/60" = A1/(TOI_All/60),
+                      "A2/60" = A2/(TOI_All/60),
+                      "Points/60" = Points/(TOI_All/60),
+                      "primary_points" = G+A1)
+```
+
+Using mutate to add rate columns (goals scored per 60 minutes played, etc) and overwriting
+
+```{r}
+clean_data %>% filter(str_detect(Player, "^J+")) %>% head()
+```
+Using stringr and regex to filter the table for all players whose first name starts with a "J", for no reason other than the fact that after watching hockey for so long, I always felt like there were many players whose names started with J. 
+
+```{r}
+#I have a lot of numeric variables so I will choose a few
+q = c(.25, .5, .75)
+primary_points_calc <- function(G, A1) {
+  primary_points <- (G+A1)
+  return(primary_points)
+}
+summary_data <- clean_data %>% summarize(avg_GP = mean(GP),
+                           avg_goals = mean(G),
+                           avg_primary_assists = mean(A1),
+                           avg_primary_points = mean(primary_points_calc(G,A1)),
+                           sd_GP = sd(GP),
+                           sd_goals = sd(G),
+                           sd_primary_assists = sd(A1),
+                           sd_primary_points = sd(primary_points_calc(G,A1)),
+                           var_GP = var(GP),
+                           var_goals = var(G),
+                           var_assists = var(A1+A2),
+                           var_primary_points = var(primary_points_calc(G,A1)),
+                           var_GP = var(GP),
+                           quant25_GP = quantile(GP, probs = q[1]),
+                           quant50_GP = quantile(GP, probs = q[2]),
+                           quant75_GP = quantile(GP, probs = q[3]),
+                           quant25_goals = quantile(G, probs = q[1]),
+                           quant50_goals = quantile(G, probs = q[2]),
+                           quant75_goals = quantile(G, probs = q[3]),
+                           quant25_primary_assists = quantile(A1, probs = q[1]),
+                           quant50_primary_assists = quantile(A1, probs = q[2]),
+                           quant75_primary_assists = quantile(A1, probs = q[3]),
+                           quant25_primary_points = quantile(primary_points_calc(G,A1), probs = q[1]),
+                           quant50_primary_points = quantile(primary_points_calc(G,A1), probs = q[2]),
+                           quant75_primary_points = quantile(primary_points_calc(G,A1), probs = q[3]),
+                           min_GP = min(GP),
+                           min_goals = min(G),
+                           min_primary_assists = min(A1),
+                           min_primary_points = min(primary_points_calc(G,A1)),
+                           max_GP = max(GP),
+                           max_goals = max(G),
+                           max_primary_assists = max(A1),
+                           max_primary_points = max(primary_points_calc(G,A1)),
+                           distinct_players = n_distinct(Player),
+                           distinct_teams = n_distinct(Team))
+
+install.packages("gt")
+library(gt)
+gt_tbl <- summary_data %>% pivot_longer(cols=everything(), names_to = "summary_stat")
+gt_tbl <- gt_tbl %>% gt() %>% tab_header(title = "Some Summary Statistics",
+                                subtitle = "There are too many numeric variables for me to do all of them")
+gt_tbl
+```
+The function primary_points_calc is is a function that takes the number of goals and primary assists a player has and adds them together to get the total number of primary points. I used it inside summarize in place of the primary_points column, which is the same thing. 
+I then created a table called summary_data that has summary statistics for a few numeric variables (summary statistics: average, sd, var, quantile, min, max) as well as number of distinct players in this clean dataset and distinct teams. Using pivot_longer, I made this data more readable and stylized it using gt. 
+Some of the interesting numbers here are the min goals/primary assists/primary points. This data has already been filtered to remove players who have played less than 200 minutes. That means there are players who played over 200 minutes of hockey in the 2020-2021 NHL season that failed to register a single goal, primary assist, or primary point! It is also cool that the 50th percentile of goals is 5 and the 75th is 10, but the league's leading goal scorer (Auston Matthews) scored 41 goals. That is about 6 standard deviations above the mean as well. I think this shows the distribution of skill and talent in the league-- the superstars are far better than the average NHL player, and there are only a few of them in the league!
+
+```{r}
+summary_data_grouped <- clean_data %>%group_by(Team) %>% 
+  summarize(total_players = n_distinct(Player), 
+            total_GAR = sum(GAR),
+            total_WAR = sum(WAR),
+            total_SPAR = sum(SPAR),
+            total_xGAR = sum(xGAR),
+            total_xWAR = sum(xWAR),
+            total_xSPAR = sum(xSPAR),
+            avg_GAR = mean(GAR),
+            avg_WAR = mean(WAR),
+            avg_SPAR = mean(SPAR),
+            avg_xGAR = mean(xGAR),
+            avg_xWAR = mean(xWAR),
+            avg_xSPAR = mean(xSPAR),
+            sd_GAR = sd(GAR),
+            sd_WAR = sd(WAR),
+            sd_SPAR = sd(SPAR),
+            sd_xGAR = sd(xGAR),
+            sd_xWAR = sd(xWAR),
+            sd_xSPAR = sd(xSPAR),
+            var_GAR = var(GAR),
+            var_WAR = var(WAR),
+            var_SPAR = var(SPAR),
+            var_xGAR = var(xGAR),
+            var_xWAR = var(xWAR),
+            var_xSPAR = var(xSPAR),
+            quant25_GAR = quantile(GAR, probs = q[1]),
+            quant50_GAR = quantile(GAR, probs = q[2]),
+            quant75_GAR = quantile(GAR, probs = q[3]),
+            quant25_WAR = quantile(WAR, probs = q[1]),
+            quant50_WAR = quantile(WAR, probs = q[2]),
+            quant75_WAR = quantile(WAR, probs = q[3]),
+            quant25_SPAR = quantile(SPAR, probs = q[1]),
+            quant50_SPAR = quantile(SPAR, probs = q[2]),
+            quant75_SPAR = quantile(SPAR, probs = q[3]),
+            quant25_xGAR = quantile(xGAR, probs = q[1]),
+            quant50_xGAR = quantile(xGAR, probs = q[2]),
+            quant75_xGAR = quantile(xGAR, probs = q[3]),
+            quant25_xWAR = quantile(xWAR, probs = q[1]),
+            quant50_xWAR = quantile(xWAR, probs = q[2]),
+            quant75_xWAR = quantile(xWAR, probs = q[3]),
+            quant25_xSPAR = quantile(xSPAR, probs = q[1]),
+            quant50_xSPAR = quantile(xSPAR, probs = q[2]),
+            quant75_xSPAR = quantile(xSPAR, probs = q[3]),
+            min_GAR = min(GAR),
+            min_WAR = min(WAR),
+            min_SPAR = min(SPAR),
+            min_xGAR = min(xGAR),
+            min_xWAR = min(xWAR),
+            min_xSPAR = min(xSPAR),
+            max_GAR = max(GAR),
+            max_WAR = max(WAR),
+            max_SPAR = max(SPAR),
+            max_xGAR = max(xGAR),
+            max_xWAR = max(xWAR),
+            max_xSPAR = max(xSPAR))
+
+summary_data_grouped %>% arrange(desc(total_GAR))
+```
+
+The summary table above has summary statistics for GAR, WAR, SPAR, xGAR, xWAR, xSPAR, grouped by each team in the league. I then sorted by total GAR to find the teams that had the most total goals above replacement. After watching the 2021 NHL season, it is interesting that the teams that succeeded in the regular season all ranked among the top teams in terms of total GAR. But these teams did not necessarily do well in the postseason. The Bruins did not do well in the playoffs, which may be explained by their low expected GAR. Their total GAR being higher than their total expected GAR means that they overperformed and/or got lucky, generating more goals above replacement than expected of them. On the other hand, Colorado was the best team in the league by a good margin in terms of total GAR and total expected GAR, but still lost in the second round in the playoffs.
+
+#### Visualizing
+
+```{R}
+ggplot(clean_data, aes(x=GAR, y=xGAR, color = Position)) + 
+  geom_point(aes(alpha=0.5)) + geom_smooth(method=lm, se=FALSE, fullrange=TRUE) + ggtitle("GAR vs. xGAR") + scale_y_continuous(breaks=c(-10,-5,0,5,10,15, 20, 25, 30, 35)) + scale_x_continuous(breaks=c(-10,-5,0,5,10,15, 20, 25, 30, 35))
+```
+
+This plot shows the actual GAR for every player that played over 200 minutes on the x-axis, and the expected GAR (xGAR) on the y-axis, grouped by position. For the most part, players of every position were clustered around the trendline y=x, meaning there isn't a huge disparty between the actual GAR and the xGAR. While the forwards all had similar regression lines around y=x, defensemen generally had a higher GAR than xGAR, making the regression line flatter. One player that really stands out in this plot is Auston Matthews, who has a much higher xGAR than actual GAR. This could suggest that he was unlucky during the season and actually made all the plays that should have generated more goals above replacement. Meanwhile, Connor McDavid had the highest GAR in the league and generally performed as expected as well. 
+
+```{R}
+ggplot(clean_data, aes(x=primary_points, y=GAR, color = Position)) + 
+  geom_point(aes(alpha=0.5)) + geom_smooth(method=lm, se=FALSE, fullrange=TRUE) + ggtitle("Primary Points vs. GAR") + scale_y_continuous(breaks=c(-10,-5,0,5,10,15, 20, 25, 30, 35)) + scale_x_continuous() + scale_color_manual(values=c("#86BA90", "#D00000", "#3F88C5", "#FFBA08", "#A2AEBB"))
+```
+
+This is a plot of primary points vs GAR, which can be interpreted as a player's box score/scoreboard impact on the game vs. their more "unseen" impacts on the game. I chose to plot primary points instead of total points because primary points are more "valuable" even though all goals and assists are equivalent to one point. A primary point means that the player scored the goal or was the primary assist on a goal, and it excludes second assists. Connor McDavid once again stands out as far beyond the rest of the players in the league in terms of both primary points and GAR. An interesting observation here is that many defensemen who have few primary points actually have high GAR totals, which could suggest that points is not indicative of their actual impact of the game. This makes sense as defensemen contribute to the game outside of scoring points, as their primary job is not to score goals. Additionally, there are many forwards, specifically centers, who seem to be below the linear regression lines, suggesting that points are overexaggerating true their impact on the game and not accounting for things like defensive failures, which GAR does take into account. 
+
+```{R}
+mean_GAR <- clean_data %>% pull(GAR) %>% mean()
+ggplot(clean_data, aes(x=Team, y=GAR)) + 
+    geom_boxplot() + stat_summary(fun.y=mean, geom="point", color="red", fill="red") + coord_flip() + geom_hline(yintercept = mean_GAR, color = "red", aes(alpha=0.5)) + ggtitle("Boxplot of GAR per Team", subtitle = "Red line indicates league average GAR, red point indicates average GAR for each team") + scale_y_continuous(breaks=c(-10,-5,0,5,10,15, 20, 25, 30, 35))
+```
+
+When comparing the average GAR on each team in the league, it is immediately evident which teams have superstars that are far better than the rest of the players on their team. Once again, Connor McDavid on the Edmonton Oilers is not only a standout performer among all teams, but clearly is much better than most players on his own team. On the other hand, Cale Makar on the Colorado Avalanche who actually has a high GAR value is not shown as an outlier on this plot because the Colorado Avalanche as a team blew the league average GAR away as the best team in terms of GAR. The worst team in terms of average GAR was the Detroit Red Wings, which checks out as they were the last place team in the league. Teams without evident outliers that had high average GAR values include the Toronto Maple Leafs, Pittsburgh Penguins, Tampa Bay Lightning, Minnesota Wild, Calgary Flames, and Boston Bruins. This suggests that these teams have groups of top/high performing players, and therefore an outlier would not present itself in the way that Connor McDavid does for the Oilers or Jared McCann does for the Penguins. 
+
+#### Concluding Remarks
+
+In conclusion, there was a lot of data included with the CSVs that was interesting, and I did not get to explore the relationships between as many of them as I would have liked. However, I do think that it is worthwile to have investiagated the correlation or the lack of it between unseen contributions to the game (GAR/WAR/SPAR and the expected values of each) as well as the more commonly seen box scores. This project, even in its brevity, showed that there is often more than meets the eye and points alone should not be taken at face value, especially for players who may fly under the radar because of their position (defensemen specifically) or their point total.
